@@ -13,6 +13,8 @@ PAT_NAME = "TABLEAU_PAT_NAME"
 PAT_SECRET = "TABLEAU_PAT_SECRET"
 USERNAME = "TABLEAU_ADMIN_USERNAME"
 PASSWORD = "TABLEAU_ADMIN_PASSWORD"
+LEGACY_USERNAME = "TABLEAU_USERNAME"
+LEGACY_PASSWORD = "TABLEAU_PASSWORD"
 AUTH_MODE = "TABLEAU_AUTH_MODE"
 
 Prompt = Callable[[str], str]
@@ -107,6 +109,13 @@ def _save(values: dict[str, str]) -> None:
     print("Values were also loaded into the current Python process.")
 
 
+def _password_credentials() -> tuple[str, str]:
+    """Read canonical admin credentials, accepting the original names as aliases."""
+    username = os.getenv(USERNAME, "").strip() or os.getenv(LEGACY_USERNAME, "").strip()
+    password = os.getenv(PASSWORD, "") or os.getenv(LEGACY_PASSWORD, "")
+    return username, password
+
+
 def ensure_environment(
     *,
     interactive: bool,
@@ -114,7 +123,18 @@ def ensure_environment(
     secret_prompt: SecretPrompt = getpass.getpass,
 ) -> TableauEnvironment:
     """Load Tableau configuration, prompting and persisting missing values when allowed."""
-    names = [SERVER, SITE, VERIFY_SSL, AUTH_MODE, PAT_NAME, PAT_SECRET, USERNAME, PASSWORD]
+    names = [
+        SERVER,
+        SITE,
+        VERIFY_SSL,
+        AUTH_MODE,
+        PAT_NAME,
+        PAT_SECRET,
+        USERNAME,
+        PASSWORD,
+        LEGACY_USERNAME,
+        LEGACY_PASSWORD,
+    ]
     refresh_process_from_user_environment(names)
 
     server = os.getenv(SERVER, "").strip()
@@ -122,12 +142,13 @@ def ensure_environment(
     site = os.getenv(SITE, "").strip()
     verify_present = VERIFY_SSL in os.environ
     auth_mode = os.getenv(AUTH_MODE, "").strip().casefold()
+    existing_username, existing_password = _password_credentials()
 
     # Backward compatibility with the initial script: infer auth mode from populated pairs.
     if not auth_mode:
         if os.getenv(PAT_NAME, "").strip() and os.getenv(PAT_SECRET, "").strip():
             auth_mode = "pat"
-        elif os.getenv(USERNAME, "").strip() and os.getenv(PASSWORD, ""):
+        elif existing_username and existing_password:
             auth_mode = "password"
 
     missing_base = []
@@ -142,10 +163,10 @@ def ensure_environment(
     if not server:
         server = _prompt_nonempty("Tableau server URL (for example https://tableau.example.com): ", prompt)
         to_save[SERVER] = server
-    if not site_present:
+    if not site_present and interactive:
         site = prompt("Tableau site content URL [blank = Default site]: ").strip()
         to_save[SITE] = site
-    if not verify_present:
+    if not verify_present and interactive:
         to_save[VERIFY_SSL] = "true"
 
     if not auth_mode:
@@ -172,8 +193,7 @@ def ensure_environment(
                 to_save[PAT_SECRET] = pat_secret
         username = password = ""
     elif auth_mode == "password":
-        username = os.getenv(USERNAME, "").strip()
-        password = os.getenv(PASSWORD, "")
+        username, password = _password_credentials()
         if not username or not password:
             if not interactive:
                 missing = [name for name, value in ((USERNAME, username), (PASSWORD, password)) if not value]

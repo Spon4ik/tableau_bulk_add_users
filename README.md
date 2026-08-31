@@ -32,10 +32,12 @@ Preferred PAT authentication:
 - `TABLEAU_PAT_NAME`
 - `TABLEAU_PAT_SECRET`
 
-Username/password fallback:
+Username/password fallback uses the canonical admin-specific names:
 
-- `TABLEAU_USERNAME`
-- `TABLEAU_PASSWORD`
+- `TABLEAU_ADMIN_USERNAME`
+- `TABLEAU_ADMIN_PASSWORD`
+
+For backward compatibility, existing `TABLEAU_USERNAME` / `TABLEAU_PASSWORD` values are still accepted when the canonical admin-specific variables are absent. New interactive configuration is saved only under the canonical names.
 
 When interactive mode detects missing values, it asks for them and persists them in the **Windows user environment** (`HKCU\Environment`). Secrets use a hidden `getpass` prompt and are never printed.
 
@@ -89,7 +91,9 @@ Both `users.csv` and `users.txt` are git-ignored because real user lists should 
 
 ## Interactive Jupyter workflow
 
-Open `tableau_bulk_add_users.ipynb`. The notebook imports the helpers rather than copying their source. It prompts for the existing local group name and users-file path, then shows:
+Open `tableau_bulk_add_users.ipynb`. The notebook imports the helpers rather than copying their source. Its first code cell reloads the helper modules from disk before binding their public names, so a `git pull` made while a Jupyter kernel is still running does not leave the notebook using an older cached helper API.
+
+It prompts for the existing local group name and users-file path, then shows:
 
 1. selected users file and normalized requested-user list;
 2. authentication status;
@@ -139,7 +143,7 @@ python -m pip install pytest
 python -m pytest -q
 ```
 
-The deterministic tests use a fake Tableau service, so orchestration behavior can be validated without spending API calls or requiring credentials.
+The deterministic tests use a fake Tableau service, so orchestration behavior can be validated without spending API calls or requiring credentials. The notebook contract tests also simulate a stale cached helper module and verify that the notebook import cell reloads the current helper API.
 
 ## Prior art reviewed before implementation
 
