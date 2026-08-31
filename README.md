@@ -11,7 +11,7 @@ The important architectural rule is that business logic lives under `helpers/`. 
 - `helpers/environment.py` — persistent Windows user-environment configuration and interactive credential bootstrap.
 - `helpers/tableau_service.py` — thin TSC adapter.
 - `helpers/orchestrator.py` — step-by-step workflow and per-user statuses.
-- `helpers/user_input.py` — TXT/CSV/list parsing and de-duplication.
+- `helpers/user_input.py` — users-file resolution, TXT/CSV parsing, group prompting, and de-duplication.
 - `tableau_bulk_add_users.py` — scheduler/CLI entry point.
 - `tableau_bulk_add_users.ipynb` — interactive notebook using the same helpers.
 - `Run.cmd` — Windows launcher with a project-local virtual environment.
@@ -37,16 +37,62 @@ Username/password fallback:
 - `TABLEAU_USERNAME`
 - `TABLEAU_PASSWORD`
 
-When interactive mode detects missing values, it asks for them and persists them in the **Windows user environment** (`HKCU\\Environment`). Secrets use a hidden `getpass` prompt and are never printed.
+When interactive mode detects missing values, it asks for them and persists them in the **Windows user environment** (`HKCU\Environment`). Secrets use a hidden `getpass` prompt and are never printed.
 
 > Security note: persistent environment variables are convenient for Task Scheduler but they are not an encrypted secret vault. Prefer a narrowly scoped Tableau Personal Access Token and a dedicated Windows account for scheduled execution. If stronger secret storage becomes a requirement, Windows Credential Manager or an enterprise vault is preferable.
 
+## Run-input contract
+
+The target group and the user list have deliberately different input rules:
+
+- **Group name**
+  - `--group "Existing Local Group"` for command-line / scheduler runs.
+  - interactive prompt when `Run.cmd` or the notebook is used interactively.
+- **Users**
+  - users are always read from a file; direct `--users` / `--user` username arguments are not accepted.
+  - `--users-file "D:\Automation\users.csv"` has highest precedence.
+  - interactive mode prompts for a users-file path.
+  - pressing Enter at that prompt, or omitting `--users-file` in a noninteractive run, falls back to the project root:
+    1. `users.csv`
+    2. `users.txt`
+  - an explicitly supplied invalid path is an error; the program does not silently switch to a fallback file.
+
+The project-root fallback is resolved from the repository location, not the current working directory, so Windows Task Scheduler can launch the script from another working directory safely.
+
+## User-file format
+
+Both `users.csv` and `users.txt` can contain a simple comma-separated list:
+
+```text
+alice,bob,carol
+```
+
+Multiple lines are also accepted:
+
+```text
+alice,bob
+carol
+```
+
+Headered CSV remains supported. A column named `username`, `user`, `login`, or `name` is used:
+
+```csv
+username
+alice
+bob
+carol
+```
+
+Usernames are trimmed and de-duplicated case-insensitively while preserving requested order.
+
+Both `users.csv` and `users.txt` are git-ignored because real user lists should not be committed.
+
 ## Interactive Jupyter workflow
 
-Open `tableau_bulk_add_users.ipynb`. The notebook imports the helpers rather than copying their source. A normal run shows:
+Open `tableau_bulk_add_users.ipynb`. The notebook imports the helpers rather than copying their source. It prompts for the existing local group name and users-file path, then shows:
 
-1. authentication status;
-2. the normalized requested-user list;
+1. selected users file and normalized requested-user list;
+2. authentication status;
 3. validation of the exact existing local group;
 4. current membership count;
 5. each attempted add and final per-user status;
@@ -56,20 +102,26 @@ The first interactive run can bootstrap missing Tableau environment settings.
 
 ## CLI / scheduler
 
-Install once by simply running `Run.cmd`; it creates `.venv` and installs the pinned TSC dependency when needed.
+Run `Run.cmd`; it creates `.venv` and installs the pinned TSC dependency when needed.
 
-Interactive first-time setup (either enter run inputs interactively or provide them on the command line):
+Interactive run:
 
 ```bat
 Run.cmd
-
-Run.cmd --group "My Local Group" --users "alice,bob" --interactive-auth
 ```
 
-Unattended scheduler run:
+You will be prompted for the group name and users-file path. If `users.csv` or `users.txt` exists in the project root, pressing Enter at the file prompt uses it.
+
+Unattended scheduler with an explicit users file:
 
 ```bat
-Run.cmd --group "My Local Group" --users-file "D:\\Automation\\tableau-users.csv"
+Run.cmd --group "My Local Group" --users-file "D:\Automation\tableau-users.csv"
+```
+
+Unattended scheduler using the project-root fallback:
+
+```bat
+Run.cmd --group "My Local Group"
 ```
 
 Dry run:
@@ -78,11 +130,7 @@ Dry run:
 Run.cmd --group "My Local Group" --users-file users.csv --dry-run
 ```
 
-For Windows Task Scheduler, run the task under the same Windows account whose user environment contains the Tableau variables. The scheduled path should pass `--group` and `--users-file`; it should **not** pass `--interactive-auth`.
-
-## User files
-
-TXT supports one username per line or comma-separated values. CSV accepts a column named `username`, `user`, `login`, or `name`. Usernames are trimmed and de-duplicated case-insensitively while preserving the requested order.
+For Windows Task Scheduler, run the task under the same Windows account whose user environment contains the Tableau variables. Do **not** use `--interactive` or `--interactive-auth` for normal unattended runs.
 
 ## Tests
 
