@@ -163,10 +163,10 @@ def ensure_environment(
     if not server:
         server = _prompt_nonempty("Tableau server URL (for example https://tableau.example.com): ", prompt)
         to_save[SERVER] = server
-    if not site_present:
+    if not site_present and interactive:
         site = prompt("Tableau site content URL [blank = Default site]: ").strip()
         to_save[SITE] = site
-    if not verify_present:
+    if not verify_present and interactive:
         to_save[VERIFY_SSL] = "true"
 
     if not auth_mode:
